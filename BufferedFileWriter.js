@@ -25,8 +25,6 @@ var BufferedFileWriter = function() {
 
 	var __chunk;
 
-	var __tempTotalB64 = [];
-
 	var init = function() {
 		__buffer = [];
 		__bufferSize = 3000; 

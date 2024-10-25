@@ -8,7 +8,7 @@ var BufferedFileWriter = function() {
 			paddingOptional: false,
 			foreignCharacters: false,
 			maxLineLength: null,
-			lineSeparator: '\r\n'
+			lineSeparator: '\r\n',
 	};
 
 	var __buffer = null;
@@ -22,19 +22,26 @@ var BufferedFileWriter = function() {
 	var __docPosition = 0;
 	var __startTime = 0;
 	var __endTime = 0;
+	var __stringCharset = null;
 
 	var __chunk;
 
 	var init = function() {
+		__stringCharset = 'UTF-8';
 		__buffer = [];
 		__bufferSize = 3000; 
 		__inputBytes = [];
 		__startTime = new GlideDateTime().getNumericValue();
 	};
 
+	me.setCharset = function(charset) {
+		this.__stringCharset = charset;
+	};
+
 	me.open = function(fileName, table, tableSysId, contentType) {
-		
-		if (!fileName) return null;
+		if (!fileName || !table || !tableSysId){
+			throw 'BufferedFileWriter error: fileName, table and tableSysId are required';
+		} 
 
 		var extension = __getExtensionFromFileName(fileName);
 		__mimeType = contentType || __getMimeTypeFromExtension(extension);
@@ -59,10 +66,8 @@ var BufferedFileWriter = function() {
 		__writeBytes();
 	};
 
-	me.appendString = function(string, optCharset) {
-		// Charset: see Java charsets
-		var stringBytes = new Packages.java.lang.String(string, optCharset || "Windows-1252");
-		me.appendBytes(stringBytes.getBytes());
+	me.appendString = function(string) {
+		me.appendBytes(new Packages.java.lang.String(string).getBytes(__stringCharset));
 	};
 
 	me.appendFile = function(attachmentSysId) {
@@ -85,10 +90,10 @@ var BufferedFileWriter = function() {
 		__endTime = new GlideDateTime().getNumericValue();
 
 		gs.info('BufferedFileWriter created file:\n ' + JSON.stringify({
-			__mimeType: __mimeType,
-			__fileName: __fileName,
-			__sysAttachment: __sysAttachment,
-			totalTime: (__endTime - __startTime) + 'ms'
+			mimeType: __mimeType,
+			fileName: __fileName,
+			sysAttachment: __sysAttachment,
+			creationTime: (__endTime - __startTime) + 'ms'
 		}));
 
 		return __sysAttachment;
@@ -114,24 +119,28 @@ var BufferedFileWriter = function() {
 			__writeChunk(false);
 			offset += chunkSize;
 		}
+		__inputBytes = [];
 	};
 
 	__writeChunk = function(isFileEnd) {
-		
-		__buffer = __buffer.concat(__chunk);
-
-		while (__buffer.length >= __bufferSize) {
-			var toWrite = __buffer.slice(0, __bufferSize);
-			__buffer = __buffer.slice(__bufferSize);
-			__writeSysAttachmentDoc(toWrite);
+		if (!isFileEnd) {
+			__buffer = __buffer.concat(__chunk);
 		}
-
-		if (isFileEnd) {
-			__writeSysAttachmentDoc(__buffer);
+		
+		if (__buffer.length >= __bufferSize || isFileEnd) {
+			var toWrite = __buffer.slice(0, __bufferSize);
+			__writeSysAttachmentDoc(toWrite, isFileEnd);
+			__buffer = __buffer.slice(__bufferSize);
 		}
 	};
 
-	__writeSysAttachmentDoc = function(toWrite) {
+	__writeSysAttachmentDoc = function(toWrite, isFileEnd) {
+
+		// B64 encoder wants a byte length of a multiple of 3
+		while (isFileEnd && toWrite.length % 3 !== 0) {
+			toWrite.push(32);
+		}
+
 		var b64 = __getChunkBase64(toWrite);
 		var grAttachmentDoc = new GlideRecord('sys_attachment_doc');
 		grAttachmentDoc.initialize();
@@ -142,24 +151,23 @@ var BufferedFileWriter = function() {
 		grAttachmentDoc.insert();
 
 		__docPosition++;
-
 		__totalSizeBytes += toWrite.length;
 	};
 
 	__transformByteArrayToUnsignedBytes = function() {
-		
 		var temp = [];
 		for (var i = 0; i < __inputBytes.length; i++) {
 			temp.push(__inputBytes[i]);
 		}
 		for (i = 0; i < temp.length; i++) {
-			if (temp[i] < 0) temp[i] += 256;
+			if (temp[i] < 0) {
+				temp[i] += 256;
+			} 
 		}
 		__inputBytes = temp; 
 	};
 
 	__getChunkBase64 = function(bytes) {
-
 		var alphabet = __base64DefaultOptions.alphabet;
 		var padding = __base64DefaultOptions.padding;
 		var paddingOptional = __base64DefaultOptions.paddingOptional;
@@ -194,8 +202,8 @@ var BufferedFileWriter = function() {
 			string +=
 			alphabet[octet1] +
 			alphabet[octet2] +
-			(isNaN(byte2) == false ? alphabet[octet3] : paddingCharacter) +
-			(isNaN(byte3) == false ? alphabet[octet4] : paddingCharacter);
+				(isNaN(byte2) == false ? alphabet[octet3] : paddingCharacter) +
+				(isNaN(byte3) == false ? alphabet[octet4] : paddingCharacter);
 		}
 		
 		if (maxLineLength) {
